@@ -545,12 +545,26 @@ def corpus():
                 w.kv.update(borderx=center, borderz=center, bordersize=size, darken=11)
                 mode = 'tick_chunk' if k % 2 == 0 else 'pos'
                 cases.append(f'border/{size}/{center}/{k} mode={mode} cat=monster start=8,64,8 {w.tokens()}')
+    # Fixed flat worlds isolate border/status checks from height-sampling differences.
+    for size in (2, 15.5, 16, 16.5, 64):
+        for mode in ('gen', 'tick_chunk', 'pos'):
+            for state, inactive in (('active', None), ('inactive', '1,0;0,1;-1,0;0,-1')):
+                for seed in range(12):
+                    w = World(rng)
+                    w.kv.update(biome='minecraft:plains', sky=15, light=0, darken=11,
+                                borderx=8, borderz=8, bordersize=size, seed=seed)
+                    if inactive:
+                        w.kv['inactive'] = inactive
+                    w.block(box(-48, -64, -48, 63, 63, 63), 'minecraft:grass_block')
+                    w.players.append('40,64,40/survival')
+                    cases.append(f'border-flat/{mode}/{size}/{state}/{seed} mode={mode} cat=monster start=15,64,8 {w.tokens()}')
     return cases
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prepare', action='store_true')
+    parser.add_argument('--only', help='run cases whose names contain this substring')
     args = parser.parse_args()
     build = lab.LOCAL / 'rust-natural-spawn-parity'
     build.mkdir(parents=True, exist_ok=True)
@@ -565,7 +579,9 @@ def main():
                lab.ROOT / 'crates/horizon-client/src/mobs/spawn_rules.rs']
     tested = base.source_hashes(sources)
     inputs = build / 'inputs.txt'
-    cases = corpus()
+    cases = [case for case in corpus() if not args.only or args.only in case.split()[0]]
+    if not cases:
+        parser.error('no cases match --only')
     inputs.write_text(''.join(line + '\n' for line in cases), encoding='utf-8')
     classes = build / 'classes'
     classes.mkdir(exist_ok=True)
@@ -598,6 +614,7 @@ def main():
     lab.write_json(build / 'report.json', {
         'schema': 1, 'minecraft': lock['minecraft']['version'], 'platform': platform.platform(), 'cases': len(cases),
         'attempts': attempts, 'type_checks_passed': tests, 'spawns': spawns, 'sources_sha256': tested,
+        'case_filter': args.only,
         'scope': 'NaturalSpawner: createState (counts, spawn potential, local caps), getFilteredSpawningCategories, '
                  'spawnForChunk, spawnCategoryForPosition (distance and respawn checks, getRandomSpawnMobAt over mobsAt: '
                  'fortress bounds, structure spawn overrides, biome spawns; isValidSpawnPostitionForType with '

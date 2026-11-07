@@ -298,6 +298,8 @@ impl<'p> NearestPlayers<'p> {
 pub(super) struct GameLevel<'g, 'a> {
     pub(super) game: &'g Game<'a>,
     pub(super) w: MobWorld<'g>,
+    /// Loading status is immutable during this borrowed spawning pass.
+    spawn_levels: horizon_client::ticket_levels::Levels,
     /// Every player in the level ([`Game::level_players`]).
     pub(super) players: Vec<LevelPlayer>,
     /// Where the non-spectators among them are (`getNearestPlayer`).
@@ -389,6 +391,14 @@ impl GameLevel<'_, '_> {
     fn zoomed_biome(&self, x: i32, y: i32, z: i32) -> Option<&BiomeInfo> {
         let [x, y, z] = self.zoomed(x, y, z);
         self.biome(x, y, z)
+    }
+}
+impl GameLevel<'_, '_> {
+    /// `ServerLevel.canSpawnEntitiesInChunk` for an already resident chunk.
+    /// Initial candidates passed `ticking_chunk`; crossing attempts also check residency.
+    fn can_spawn_in_resident_chunk(&self, cx: i32, cz: i32) -> bool {
+        self.spawn_levels.loaded_entity_ticking(cx, cz)
+            && self.game.border.geometry().is_chunk_within_bounds(cx, cz)
     }
 }
 impl SpawnLevel for GameLevel<'_, '_> {
@@ -546,9 +556,7 @@ impl NaturalLevel for GameLevel<'_, '_> {
     }
     /// `ServerLevel.canSpawnEntitiesInChunk`: the whole chunk is inside the border.
     fn can_spawn_in_chunk(&self, cx: i32, cz: i32) -> bool {
-        self.game.world.chunks.contains_key(&(cx, cz))
-            && self.within_world_border(cx << 4, cz << 4)
-            && self.within_world_border((cx << 4).wrapping_add(15), (cz << 4).wrapping_add(15))
+        self.game.world.chunks.contains_key(&(cx, cz)) && self.can_spawn_in_resident_chunk(cx, cz)
     }
     fn no_collision(&self, bounds: Aabb) -> bool {
         let mut scene = SceneCollisions {
@@ -650,6 +658,7 @@ impl<'a> Game<'a> {
         GameLevel {
             game: self,
             w: self.mob_world_base(&[]),
+            spawn_levels: self.tickets.levels(),
             players,
             nearest,
             pending: Default::default(),
@@ -823,7 +832,7 @@ impl<'a> Game<'a> {
             if !categories.is_empty() {
                 for chunk in scratch.candidates.drain(..) {
                     // ServerChunkCache.tickSpawningChunk gates the initial chunk too.
-                    if !level.can_spawn_in_chunk(chunk.0, chunk.1) {
+                    if !level.can_spawn_in_resident_chunk(chunk.0, chunk.1) {
                         continue;
                     }
                     let mut spawn = |l: &GameLevel, r: &SpawnRequest| {
@@ -1005,6 +1014,75 @@ mod tests {
             LegacyRandom::new(12345).next_long()
         );
     }
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn natural_spawning_rejects_resident_chunks_without_entity_ticking_status() {
+        use horizon_client::{chunk::Chunk, ticket_levels::Sources};
+        use std::sync::Arc;
+        let mut game = crate::game::native_machines::tests::server_game();
+        game.world
+            .chunks
+            .insert((1, 0), Arc::new(Chunk::empty(1, 0)));
+        let mut sources = Sources {
+            players: vec![(0, 0)],
+            forced: Vec::new(),
+            portal: Vec::new(),
+            dragon: None,
+            view_distance: 0,
+            simulation_distance: 8,
+        };
+        game.tickets.update(Some(sources.clone()));
+        assert!(game.tickets.levels().loaded_ticking(1, 0));
+        assert!(game.world.chunks.contains_key(&(1, 0)));
+        assert!(game.natural_level().can_spawn_in_chunk(0, 0));
+        assert!(!game.natural_level().can_spawn_in_chunk(1, 0));
+        sources.forced.push((1, 0));
+        game.tickets.update(Some(sources));
+        assert!(game.natural_level().can_spawn_in_chunk(1, 0));
+        assert!(!game.natural_level().can_spawn_in_chunk(2, 0)); // absent, even with no border rejection
+    }
+
+    #[test]
+    #[ignore = "needs prepared resources in HORIZON_TEST_RESOURCES"]
+    fn border_updates_preserve_multi_chunk_shuffle_and_inhabited_time() {
+        use horizon_client::{chunk::Chunk, motion::PlayerMotion};
+        use std::sync::Arc;
+        let mut game = crate::game::native_machines::tests::server_game();
+        for x in -2..=2 {
+            for z in -2..=2 {
+                let mut chunk = Chunk::empty(x, z);
+                chunk.lit = true;
+                game.world.chunks.insert((x, z), Arc::new(chunk));
+            }
+        }
+        game.tickets.update(None);
+        game.player = Some(PlayerMotion::new(game.motion, Vec3::new(8.5, 64.0, 8.5)).unwrap());
+        game.border.set_center([8.0, 8.0]);
+        game.border.set_size(2.0);
+        let mut scratch = SpawnScratch::default();
+        game.spawning_chunks(&game.level_players(), &mut scratch);
+        assert_eq!(scratch.candidates.len(), 9);
+        // Java Random(12345), Collections.shuffle(list of 9), nextLong().
+        const AFTER_SHUFFLE: i64 = 4_344_647_195_749_500_666;
+        for tick in 1..=2 {
+            game.world.random = LegacyRandom::new(12345);
+            game.spawn_natural();
+            assert_eq!(game.world.random.next_long(), AFTER_SHUFFLE);
+            assert_eq!(game.world.inhabited.get(&(0, 0)), Some(&tick));
+        }
+        // Same player/chunk cache: growing the border must permit attempts immediately.
+        game.border.set_size(64.0);
+        game.world.random = LegacyRandom::new(12345);
+        game.spawn_natural();
+        assert_ne!(game.world.random.next_long(), AFTER_SHUFFLE);
+        // Moving it away must refuse them again without removing shuffle draws.
+        game.border.set_center([1000.0, 1000.0]);
+        game.world.random = LegacyRandom::new(12345);
+        game.spawn_natural();
+        assert_eq!(game.world.random.next_long(), AFTER_SHUFFLE);
+        assert_eq!(game.world.inhabited.get(&(0, 0)), Some(&4));
+    }
+
     fn player(x: f64, y: f64, z: f64, spectator: bool) -> LevelPlayer {
         LevelPlayer {
             uuid: 0,

@@ -154,6 +154,7 @@ public final class VanillaNaturalSpawnOracle {
         ResourceKey<Level> dimensionKey;
         LevelData.RespawnData respawn;
         Set<Long> unloaded = new HashSet<>();
+        Set<Long> inactive = new HashSet<>();
         List<Start> starts = new ArrayList<>();
         List<Entity> entities = new ArrayList<>();
         List<ServerPlayer> playerList = new ArrayList<>();
@@ -270,7 +271,7 @@ public final class VanillaNaturalSpawnOracle {
         @Override public ServerChunkCache getChunkSource() { return chunkSource; }
         @Override public StructureManager structureManager() { return structures; }
         @Override public LevelData.RespawnData getRespawnData() { return respawn; }
-        @Override public boolean canSpawnEntitiesInChunk(ChunkPos pos) { return !unloaded.contains(pos.pack()) && border.isWithinBounds(pos); }
+        @Override public boolean canSpawnEntitiesInChunk(ChunkPos pos) { return super.canSpawnEntitiesInChunk(pos); }
         @Override public DifficultyInstance getCurrentDifficultyAt(BlockPos pos) { return new DifficultyInstance(difficulty, 0L, 0L, 0.0F); }
         @Override public BlockGetter getChunkForCollisions(int chunkX, int chunkZ) { return this; }
         @Override public boolean containsAnyLiquid(AABB box) {
@@ -634,6 +635,7 @@ public final class VanillaNaturalSpawnOracle {
         level.lights = new ArrayList<>();
         level.biomes = new ArrayList<>();
         level.unloaded = new HashSet<>();
+        level.inactive = new HashSet<>();
         level.starts = new ArrayList<>();
         level.entities = new ArrayList<>();
         level.playerList = new ArrayList<>();
@@ -717,11 +719,24 @@ public final class VanillaNaturalSpawnOracle {
                         .addConstantLayer(net.minecraft.world.attribute.EnvironmentAttributeMap.builder()
                             .set(net.minecraft.world.attribute.EnvironmentAttributes.SURFACE_SLIME_SPAWN_CHANCE, Float.parseFloat(c.getOrDefault("slime", "0.0"))).build())
                         .build();
+                    level.inactive.clear();
+                    if (c.containsKey("inactive")) for (String u : c.get("inactive").split(";")) {
+                        String[] p = u.split(",");
+                        level.inactive.add(ChunkPos.pack(Integer.parseInt(p[0]), Integer.parseInt(p[1])));
+                    }
                     level.unloaded.clear();
                     if (c.containsKey("unloaded")) for (String u : c.get("unloaded").split(";")) {
                         String[] p = u.split(",");
                         level.unloaded.add(ChunkPos.pack(Integer.parseInt(p[0]), Integer.parseInt(p[1])));
                     }
+                    // Execute the shipped ServerLevel predicate and entity-manager status lookup.
+                    var visibility = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<net.minecraft.world.level.entity.Visibility>();
+                    visibility.defaultReturnValue(net.minecraft.world.level.entity.Visibility.TICKING);
+                    for (long key : level.unloaded) visibility.put(key, net.minecraft.world.level.entity.Visibility.HIDDEN);
+                    for (long key : level.inactive) visibility.put(key, net.minecraft.world.level.entity.Visibility.TRACKED);
+                    var manager = alloc(net.minecraft.world.level.entity.PersistentEntitySectionManager.class);
+                    put(manager, net.minecraft.world.level.entity.PersistentEntitySectionManager.class, "chunkVisibility", visibility);
+                    put(level, ServerLevel.class, "entityManager", manager);
                     level.starts.clear();
                     for (int i = 0; c.containsKey("s" + i); i++) {
                         String[] p = c.get("s" + i).split("/", 2);

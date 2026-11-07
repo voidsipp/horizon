@@ -120,6 +120,7 @@ struct World<'a> {
     nearest: Vec<[f64; 3]>,
     respawn: Option<[i32; 3]>,
     unloaded: HashSet<(i32, i32)>,
+    inactive: HashSet<(i32, i32)>,
     spawn_mobs: bool,
     /// The `spawner_blocks_work` game rule.
     spawners_work: bool,
@@ -321,8 +322,8 @@ impl NaturalLevel for World<'_> {
     }
     fn can_spawn_in_chunk(&self, cx: i32, cz: i32) -> bool {
         !self.unloaded.contains(&(cx, cz))
-            && self.within_world_border(cx << 4, cz << 4)
-            && self.within_world_border((cx << 4).wrapping_add(15), (cz << 4).wrapping_add(15))
+            && !self.inactive.contains(&(cx, cz))
+            && self.border.is_chunk_within_bounds(cx, cz)
     }
     fn no_collision(&self, bounds: Aabb) -> bool {
         let lookup = |x: i32, y: i32, z: i32| self.state(x, y, z);
@@ -745,6 +746,13 @@ pub fn main() -> horizon_client::Result<()> {
             players,
             respawn,
             unloaded,
+            inactive: get("inactive", "")
+                .split(';')
+                .filter_map(|p| {
+                    let (x, z) = p.split_once(',')?;
+                    Some((x.parse().ok()?, z.parse().ok()?))
+                })
+                .collect(),
             spawn_mobs: get("rules", "1") != "0",
             spawners_work: get("spawners", "1") != "0",
             placed: RefCell::new(Vec::new()),

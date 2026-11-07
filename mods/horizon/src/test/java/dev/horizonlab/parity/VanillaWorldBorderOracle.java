@@ -31,6 +31,10 @@ public final class VanillaWorldBorderOracle {
                     out.println("status "+border.getStatus().name()+" "+border.getLerpTime()+" "+border.getAbsoluteMaxSize());values(out,"state",border.getCenterX(),border.getCenterZ(),border.getSize(),border.getLerpTarget(),border.getLerpSpeed());
                     for(var partial:f.getAsJsonArray("partials")){float t=Float.intBitsToFloat(Integer.parseUnsignedInt(partial.getAsString(),16));values(out,"bounds",border.getMinX(t),border.getMinZ(t),border.getMaxX(t),border.getMaxZ(t));}
                     emit.invoke(null,out,border.getCollisionShape());
+                    for(var chunk:f.getAsJsonArray("chunks")) {
+                        var c=chunk.getAsJsonArray();
+                        out.println("chunk "+border.isWithinBounds(new net.minecraft.world.level.ChunkPos(c.get(0).getAsInt(),c.get(1).getAsInt())));
+                    }
                     for(var item:f.getAsJsonArray("queries")){
                         var q=item.getAsJsonArray();double x=number(q.get(0)),z=number(q.get(1)),margin=number(q.get(2));position.set(entity,new Vec3(x,0,z));
                         var b=new AABB(number(q.get(3)),number(q.get(4)),number(q.get(5)),number(q.get(6)),number(q.get(7)),number(q.get(8)));

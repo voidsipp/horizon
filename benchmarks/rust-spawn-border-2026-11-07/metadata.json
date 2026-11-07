@@ -1,0 +1,1 @@
+{"date":"2026-11-07","cpu":"Intel Core i5-11260H","rustc":"1.95.0 (59807616e 2026-04-14)","logical_cpu":2,"candidates":289,"rounds_per_sample":8000,"samples":9,"order":"rotated across five variants","profiles":{"fast":{"opt_level":3,"lto":false,"codegen_units":16},"thin":{"opt_level":3,"lto":"thin","codegen_units":1}}}

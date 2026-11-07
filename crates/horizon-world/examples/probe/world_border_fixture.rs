@@ -69,6 +69,11 @@ pub fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )?;
             }
             emit(&mut out, &border.collision_shape()?)?;
+            for chunk in f["chunks"].as_array().unwrap() {
+                let cx = chunk[0].as_i64().unwrap() as i32;
+                let cz = chunk[1].as_i64().unwrap() as i32;
+                writeln!(out, "chunk {}", border.is_chunk_within_bounds(cx, cz))?;
+            }
             for q in f["queries"].as_array().unwrap() {
                 let x = number(&q[0]);
                 let z = number(&q[1]);

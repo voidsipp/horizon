@@ -27,7 +27,14 @@ def corpus():
             for margin in [0,1,-0.5]:
                 width=[0,0.6,1,3][i%4]
                 queries.append(list(map(bits,[x,z,margin,0,0,0,width,1.8,width])))
-        return dict(ops=ops,partials=partials,queries=queries)
+        chunks=[[-1,-1],[0,0],[1,0],[0,1],[-1,0],[0,-1],
+                [1874998,0],[-1874999,0],[0,1874998],[0,-1874999],
+                [2147483647,-2147483648]]
+        for v in (center-size/2,center+size/2):
+            if math.isfinite(v) and abs(v)<2**31:
+                c=math.floor(v)//16
+                chunks.extend([[c+d,0] for d in (-1,0,1)])
+        return dict(ops=ops,partials=partials,queries=queries,chunks=chunks)
     for center in [0,-0.0,0.25,-0.25,29999984,-29999984,1.7e308]:
         for size in [0,-0.0,1e-8,0.125,1,5.5,59999968,1.7e308]:
             for limit in [0,1,8,29999984,2147483647]:

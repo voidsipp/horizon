@@ -241,6 +241,13 @@ impl BorderGeometry {
         let [min_x, min_z, max_x, max_z] = self.bounds(0.0);
         x >= min_x - margin && x < max_x + margin && z >= min_z - margin && z < max_z + margin
     }
+    /// `WorldBorder.isWithinBounds(ChunkPos)`: both block corners, with one extent lookup.
+    pub fn is_chunk_within_bounds(&self, cx: i32, cz: i32) -> bool {
+        let [min_x, min_z, max_x, max_z] = self.bounds(0.0);
+        let x = f64::from(cx << 4);
+        let z = f64::from(cz << 4);
+        x >= min_x && x + 15.0 < max_x && z >= min_z && z + 15.0 < max_z
+    }
     pub fn is_inside_close_to_border(&self, entity_x: f64, entity_z: f64, bounds: Aabb) -> bool {
         let size = bounds.size();
         let margin = java_max(java_max(size.x.abs(), size.z.abs()), 1.0);
@@ -252,6 +259,21 @@ impl BorderGeometry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn chunk_bounds_keep_inclusive_minimum_and_exclusive_maximum() {
+        let mut border = BorderGeometry::new([8.0, 8.0], 16.0, 29_999_984).unwrap();
+        assert!(border.is_chunk_within_bounds(0, 0));
+        assert!(!border.is_chunk_within_bounds(-1, 0));
+        assert!(!border.is_chunk_within_bounds(0, 1));
+        border.set_size(14.0).unwrap(); // [1, 15): both edges reject chunk 0.
+        assert!(!border.is_chunk_within_bounds(0, 0));
+        border.set_center([-8.0, -8.0]).unwrap();
+        border.set_size(16.0).unwrap();
+        assert!(border.is_chunk_within_bounds(-1, -1));
+        border.set_absolute_max(15).unwrap(); // [-15, 0): lower corner is outside.
+        assert!(!border.is_chunk_within_bounds(-1, -1));
+    }
+
     #[test]
     fn invalid_parameters_leave_existing_extent_unchanged() {
         let mut border = BorderGeometry::new([1.0, 2.0], 10.0, 100).unwrap();
